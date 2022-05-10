@@ -1,4 +1,5 @@
 .mypy_cache/
+data/
 .DS_Store
 README.Aalto
 *.pyc
