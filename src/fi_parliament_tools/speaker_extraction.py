@@ -64,6 +64,18 @@ class SpeakerExtractionPipeline(Pipeline):
         speakers = [frame_data[index] for index in centered_inds]
         return speakers
 
+    def rename_duplicated_speakers(self, speakers): 
+        # There are some frames in which the speakers are duplicated, meaning that there are the same ids in the same frame.
+        ids = [data['speaker_id'] for data in speakers]
+        duplicated_names = defaultdict(list)
+        for i, item in enumerate(ids):
+            duplicated_names[item].append(i)
+        for _, locs in duplicated_names.items():
+            for i in range(1, len(locs)):
+                speakers[locs[i]]['speaker_id'] = speakers[locs[i]]['speaker_id']+'d'+str(i)
+        ids = [data['speaker_id'] for data in speakers]   
+        return speakers
+
     def compute_distances(self, speakers, faces):
         faces_coords = np.array([self.obtain_center_bb(data[-1][1]) for data in faces.values()])
         speaker_coords = np.array([self.obtain_center_bb(speaker['coords']) for speaker in speakers])
@@ -100,6 +112,7 @@ class SpeakerExtractionPipeline(Pipeline):
             if frame in frames.keys():
                 frame_data = frames[frame]
                 speakers = self.find_centered_speakers(frame_data)
+                speakers = self.rename_duplicated_speakers(speakers)
                 distances = self.compute_distances(speakers, saved_faces)
                 positions = self.determine_speaker_position(distances, speakers)
                 for j, speaker in enumerate(speakers):
@@ -119,6 +132,24 @@ class SpeakerExtractionPipeline(Pipeline):
             if len(coords_list) >= self.frames_per_clip:
                 new_faces[speaker] = coords_list
         return new_faces
+
+    def fix_missing_frames(self, frames): 
+        fixed_frames = defaultdict(list)
+        for speaker, frame_info in frames.items():
+            name = speaker
+            count = 0
+            last_frame = frame_info[0][0]
+            fixed_frames[name].append(frame_info[0])
+            for next_frame, next_coords in frame_info[1:]:
+                if (next_frame - last_frame) < self.missing_threshold:
+                    for new_frame in range(last_frame+1, next_frame):
+                        fixed_frames[name].append((new_frame, next_coords))
+                elif next_frame-1 != last_frame:
+                    count += 1
+                    name = speaker + '_' + str(count)
+                fixed_frames[name].append((next_frame, next_coords))
+                last_frame = next_frame 
+        return fixed_frames
 
     def run_syncnet(self, video):
         model_path = Path("models", "syncnet_v2.model")
@@ -219,6 +250,7 @@ class SpeakerExtractionPipeline(Pipeline):
                 scene_path.mkdir(exist_ok=True)
                 faces = self.detect_faces_in_scene(frames, start_scene, end_scene)
                 faces = self.filter_short_videos(faces) # Filter captured speakers that are less than 200 frames overall
+                faces = self.fix_missing_frames(faces)
                 
                 if faces:
                     speaker_confs = defaultdict(list)
