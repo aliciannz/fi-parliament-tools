@@ -6,24 +6,19 @@ from typing import Any
 from typing import DefaultDict
 from pathlib import Path
 import json
-
 import subprocess
 from alive_progress import alive_bar
-
-
-# find corpus/ -iname "*.mp4" | sort > video_files.list
+from logging import Logger
 
 class VideoPreprocessingPipeline(Pipeline):
-    def __init__(self, metadata_path: Path, output_path: Path , extract_frames: bool = True) -> None:
-        self.metadata_path = metadata_path
-        self.output_path = output_path
+    def __init__(self, log: Logger, metadata_path: str, output_path: str) -> None:
+        super().__init__(log)
+        self.metadata_path = Path(metadata_path).resolve()
+        self.output_path = Path(output_path).resolve()
         self.output_path.mkdir(exist_ok=True)
-        self.extract_frames = extract_frames
 
-    def obtain_scene_changes(self, scene_changes_path: Path, frames):
+    def obtain_scene_changes(self, scene_changes_path: Path, first_frame: int):
         scene_changes_files = scene_changes_path.glob("*.json")
-        # First frame can only be found in frames object
-        first_frame = min(frames.keys())
         scene_changes = [first_frame]
         files = [file for file in scene_changes_files if file.is_file()]
         for file in files:
@@ -32,11 +27,18 @@ class VideoPreprocessingPipeline(Pipeline):
                 scene_changes.extend(data["frame_indices"])
         return sorted(scene_changes)
 
-    def obtain_frames(self, session, video_path):
-        frames_path = Path(self.output_path, session, "frames")
-        frames_path.mkdir(exist_ok=True)
-        command = f"ffmpeg -y -i {video_path} -qscale:v 2 -threads 1 -f image2 {Path(frames_path, '%06d.jpg')}"
-        subprocess.call(command, shell=True, stdout=None)
+    def obtain_features(self, features_path: Path):
+        features_files = features_path.glob("*.jsonl")
+        files = [file for file in features_files if file.is_file()]
+        features = defaultdict(list)
+        for file in files:
+            with file.open(mode="r", encoding="utf-8", newline="") as feats:
+                data = [json.loads(line) for line in feats]
+                for element in data:
+                    features[element['frame']].append({'coords':element['box'], 'keypoints': element['keypoints']})
+
+        return features
+
 
     def modify_coords(self, face: List[int]) -> List[int]:
         """Compute coordinates for the face crops.
@@ -61,8 +63,14 @@ class VideoPreprocessingPipeline(Pipeline):
         face_coords = [width, height, face[0], face[1]]
         return face_coords
 
+    def find_face_features(self, speaker_coords, features_coords):
+        for features in features_coords:
+            if features['coords'] == speaker_coords:
+                return features['keypoints']
+        return []
+
     def read_video_metadata(
-        self, metadata_path: Path
+        self, metadata_path: Path, features
     ) -> DefaultDict[int, List[Dict[str, Any]]]:
         """Reads the metadata provided to obtain the frame numbers, the speaker id's per each frame and the coordinates of each speaker per frame
 
@@ -79,8 +87,9 @@ class VideoPreprocessingPipeline(Pipeline):
                 frame_number = int(row_data[2])
                 speaker_id = row_data[-1].rstrip()
                 speaker_coords = [int(coord) for coord in row_data[6:10]]
-                new_speaker_coords = self.modify_coords(speaker_coords)
-                speaker_dict = {"coords": new_speaker_coords, "speaker_id": speaker_id}
+                mod_speaker_coords = self.modify_coords(speaker_coords)
+                speaker_features = self.find_face_features(speaker_coords, features[frame_number])
+                speaker_dict = {"coords": mod_speaker_coords, "speaker_id": speaker_id, "speaker_features": speaker_features}
                 frames[frame_number].append(speaker_dict)
         return frames
 
@@ -95,38 +104,38 @@ class VideoPreprocessingPipeline(Pipeline):
         }
         with open(Path(json_path, f"{session}_faces.json"), "w") as fp:
             json.dump(video, fp)
+        return json_path
 
     def read_directories(self):
         sessions_paths = []
         for path in self.metadata_path.iterdir():
             if path.is_dir():
                 session_name = str(path).split("/")[-1]
-                data = list(path.glob("session-*-faces.txt"))[0]  # TODO: Decide about this
-                scene_changes = list(path.glob("scene_changes/"))[0]
-                video_path = list(path.glob("session-*.mp4"))[0]
+                data = Path(path, f"session-{session_name}-faces.txt")
+                scenes_path = Path(path, "scene_changes/")
+                features_path = Path(path, "features/")
+                video_path = Path(path, f"session-{session_name}.mp4")
                 sessions_paths.append(
                     {
                         "session_name": session_name,
                         "video_path": video_path,
                         "metadata": data,
-                        "scene_changes": scene_changes,
+                        "scenes_path": scenes_path,
+                        "features_path": features_path
                     }
                 )
         return sessions_paths
 
     def run(self) -> None:
         sessions_paths = self.read_directories()
+        self.log.info(f"Found {len(sessions_paths)} parliament videos")
         with alive_bar(len(sessions_paths)) as bar:
             for session in sessions_paths:
-                frames = self.read_video_metadata(session["metadata"])
-                scenes = self.obtain_scene_changes(session["scene_changes"], frames)
-                self.save_to_json(session["session_name"], frames, scenes)
-                if self.extract_frames:
-                    self.obtain_frames(session["session_name"], session["video_path"])
+                self.log.info(f"Preprocessing session '{session['session_name']}'.")
+                features = self.obtain_features(session["features_path"])
+                frames = self.read_video_metadata(session["metadata"], features)
+                first_frame = min(frames.keys())
+                scenes = self.obtain_scene_changes(session["scenes_path"], first_frame)
+                save_path = self.save_to_json(session["session_name"], frames, scenes)
+                self.log.info(f"Saving session data in '{save_path}'")
             bar()
-
-if __name__ == "__main__":
-    metadata_path = Path("data/raw")
-    output_path = Path("data/processed")
-    s = VideoPreprocessingPipeline(metadata_path, output_path)
-    s.run()
