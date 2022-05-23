@@ -1,12 +1,9 @@
 from fi_parliament_tools.pipeline import Pipeline
-from fi_parliament_tools.pipeline import Pipeline
 from alive_progress import alive_bar
 from pathlib import Path
 import json
 from fi_parliament_tools.video_utils.create_videos import VideoCreatorPipeline
-from fi_parliament_tools.pipeline import Pipeline
 import math
-import os
 
 
 class AudioAlignmentPipeline(Pipeline):
@@ -18,10 +15,8 @@ class AudioAlignmentPipeline(Pipeline):
         self.output_path = output_path
         self.output_path.mkdir(exist_ok=True)
         self.session_name = data_video_path.split(".")[0]
-
-        self.frames_path = os.path.join(f"data/processed/033-2020/frames", "*.jpg")
-        video_path = Path("data/raw/033-2020/session-033-2020.mp4")
-        self.s = VideoCreatorPipeline(self.frames_path, video_path)
+        self.video_path = Path("data/raw/033-2020/session-033-2020.mp4")
+        
 
     def read_json(self):
         with open(self.data_video_path, "r") as f:
@@ -54,8 +49,13 @@ class AudioAlignmentPipeline(Pipeline):
 
     def align_audio(self, data, transcript):
         for data_row in data:
+            scene = data_row["scene"]
+            start_scene, end_scene = scene.split('-')
             start_time_d = data_row["start_frame"]
             end_time_d = data_row["end_frame"]
+            creator = VideoCreatorPipeline(self.output_path, self.video_path,  self.session_name, int(start_scene), int(end_scene))
+            creator.obtain_frames(start_time_d, end_time_d)
+
             for trans_row in transcript:
                 start_time_t = self.timestamp_to_frame(trans_row["start_timestamp"])
                 end_time_t = self.timestamp_to_frame(trans_row["end_timestamp"])
@@ -64,11 +64,10 @@ class AudioAlignmentPipeline(Pipeline):
                     start_index = start_time_t - start_time_d
                     end_index = end_time_t - start_time_d
                     coords = data_row["coords"][start_index:end_index]
-                    path_scene = Path(self.output_path, data_row["scene"])
+                    path_scene = Path(self.output_path, scene)
                     path_scene.mkdir(exist_ok=True)
-                    video = self.s.generate_audio_video(
-                        path_scene, data_row["speaker"], frames, coords
-                    )
+                    print(frames)
+                    video = creator.generate_video(data_row["speaker"], frames, coords)
                     with open(video[:-4] + ".txt", "w") as f:
                         f.write(trans_row["transcript"])
 
