@@ -217,12 +217,43 @@ class SpeakerExtractionPipeline(Pipeline):
             with open(file_path, "w") as outfile:
                 json.dump(data, outfile)
 
+    def fix_overlaps_between_speakers(self, data):
+        # More than 1 speaker detected, fix possible overlaps between speakers
+        keys = list(data.keys())
+        print("More than one possible speaker detected")
+        for speaker_1, speaker_2 in zip(keys, keys[1:]):
+            if speaker_1 in data.keys() and speaker_2 in data.keys():
+                frames_1 = [(info['start_frame'], info['end_frame']) for info in data[speaker_1]]
+                confs_1 = [info['conf'] for info in data[speaker_1]]
+                frames_2 = [(info['start_frame'], info['end_frame']) for info in data[speaker_2]]
+                confs_2 = [info['conf'] for info in data[speaker_2]]
+                for idx_1, frame_1 in enumerate(frames_1):
+                    start_frame_1, end_frame_1 = frame_1
+                    for idx_2, frame_2 in enumerate(frames_2):
+                        start_frame_2, end_frame_2 = frame_2
+                        if start_frame_1 >= start_frame_2:
+                            is_between = start_frame_1 in range(start_frame_2, end_frame_2)
+                        else:
+                            is_between = start_frame_2 in range(start_frame_1, end_frame_1)
+                        if is_between:
+                            if confs_1[idx_1] > confs_2[idx_2]:
+                                    data[speaker_2].pop(idx_2, None)
+                                    if len(data[speaker_2])==0:
+                                        data.pop(speaker_2)
+                            else:
+                                    data[speaker_1].pop(idx_1, None)
+                                    if len(data[speaker_1])==0:
+                                        data.pop(speaker_1)
+        return data
+
     def read_jsons(self):
         json_paths = Path("data/processed/033-2020").glob("**/lip_activity.json")
         speeches = []
         for path in json_paths:
             with open(path, "r") as f:
                 data = json.load(f)
+                if len(data.keys()) > 1:
+                    data = self.fix_overlaps_between_speakers(data)
                 for speaker, speaker_apps in data.items():
                     coords = []
                     for appearance in speaker_apps:
@@ -249,7 +280,8 @@ class SpeakerExtractionPipeline(Pipeline):
                 scene_path = Path(path, f"{start_scene}-{end_scene}")
                 scene_path.mkdir(exist_ok=True)
                 faces = self.detect_faces_in_scene(frames, start_scene, end_scene)
-                faces = self.filter_short_videos(faces) # Filter captured speakers that are less than 200 frames overall
+                # Filter captured speakers that are less than 200 frames overall
+                faces = self.filter_short_videos(faces) 
                 faces = self.fix_missing_frames(faces)
                 
                 if faces:
@@ -280,4 +312,5 @@ video_path = Path("data/raw/033-2020/session-033-2020.mp4")
 test = SpeakerExtractionPipeline(
     metadata_path=metadata_path, video_path=video_path, output_path=output_path
 )
-test.run()
+#test.run()
+test.read_jsons()
