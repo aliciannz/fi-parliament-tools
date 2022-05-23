@@ -13,7 +13,7 @@ from fi_parliament_tools import downloads
 from fi_parliament_tools import mptable
 from fi_parliament_tools.postprocessing import PostProcessingPipeline
 from fi_parliament_tools.preprocessing import PreprocessingPipeline
-
+from fi_parliament_tools.video_preprocessing import VideoPreprocessingPipeline
 
 def setup_logger(logfile: str) -> logging.Logger:
     """Initialize a logger that outputs to stdout and given logfile name.
@@ -235,6 +235,20 @@ def build_mptable(get_english: bool, update_old: bool) -> None:
     finally:
         final_report(log, [])
 
+@main.command()
+@click.argument("metadata_path", type=click.Path(exists=True))
+@click.argument("output_path", type=click.Path(exists=True))
+def preprocess_videos(metadata_path: str = "data/raw", output_path: str = "data/processed") -> None:
+    """
+    Preprocesses Parliament videos to save the scene changes, the coordinates and features of a face in a single json file
+    """
+    log = setup_logger(f"{date.today()}-video_preprocessing.log")
+    pipeline = VideoPreprocessingPipeline(log, metadata_path, output_path)
+    try:
+        log.info("Begin preprocessing for Parliament videos.")
+        pipeline.run()
+    finally:
+        final_report(log, [])
 
 if __name__ == "__main__":
     main(prog_name="fi-parliament-tools")  # pragma: no cover
