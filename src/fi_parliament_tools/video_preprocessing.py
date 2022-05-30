@@ -11,13 +11,12 @@ from alive_progress import alive_bar
 from logging import Logger
 
 class VideoPreprocessingPipeline(Pipeline):
-    def __init__(self, log: Logger, metadata_path: str, output_path: str) -> None:
+    def __init__(self, log: Logger, data_path: str) -> None:
         super().__init__(log)
-        self.metadata_path = Path(metadata_path).resolve()
-        self.output_path = Path(output_path).resolve()
-        self.output_path.mkdir(exist_ok=True)
+        self.data_path = Path(data_path).resolve()
 
     def obtain_scene_changes(self, scene_changes_path: Path, first_frame: int):
+        self.log.info(f"Obtaining scene changes from path '{scene_changes_path}'...")
         scene_changes_files = scene_changes_path.glob("*.json")
         scene_changes = [first_frame]
         files = [file for file in scene_changes_files if file.is_file()]
@@ -28,6 +27,7 @@ class VideoPreprocessingPipeline(Pipeline):
         return sorted(scene_changes)
 
     def obtain_features(self, features_path: Path):
+        self.log.info(f"Obtaining face features from path '{features_path}'...")
         features_files = features_path.glob("*.jsonl")
         files = [file for file in features_files if file.is_file()]
         features = defaultdict(list)
@@ -70,7 +70,7 @@ class VideoPreprocessingPipeline(Pipeline):
         return []
 
     def read_video_metadata(
-        self, metadata_path: Path, features
+        self, data_path: Path, features
     ) -> DefaultDict[int, List[Dict[str, Any]]]:
         """Reads the metadata provided to obtain the frame numbers, the speaker id's per each frame and the coordinates of each speaker per frame
 
@@ -81,34 +81,38 @@ class VideoPreprocessingPipeline(Pipeline):
             (DefaultDict[int, List[Dict[str, Any]]]): dictionary containing the speakers with their frames and coordinates
         """
         frames = defaultdict(list)
-        with metadata_path.open(mode="r", encoding="utf-8", newline="") as metadata:
+        with data_path.open(mode="r", encoding="utf-8", newline="") as metadata:
             for row in metadata:
                 row_data = row.split(" ")
+
                 frame_number = int(row_data[2])
                 speaker_id = row_data[-1].rstrip()
                 speaker_coords = [int(coord) for coord in row_data[6:10]]
                 mod_speaker_coords = self.modify_coords(speaker_coords)
                 speaker_features = self.find_face_features(speaker_coords, features[frame_number])
+                if len(speaker_features)==0:
+                    self.log.warning(f"Couldn't find face features for speaker {speaker_id} for coordinates {speaker_coords} in frame {frame_number}")
                 speaker_dict = {"coords": mod_speaker_coords, "speaker_id": speaker_id, "speaker_features": speaker_features}
                 frames[frame_number].append(speaker_dict)
         return frames
 
     def save_to_json(self, session, frames, scenes):
-        json_path = Path(self.output_path, f"{session}")
-        json_path.mkdir(exist_ok=True)
         video = {
             "width_height": [1920, 1080],
             "fps": 25,
             "frames": frames,
             "scenes": scenes,
         }
-        with open(Path(json_path, f"{session}_faces.json"), "w") as fp:
+        session_name = session.replace("session-", "")
+        final_path = Path(self.data_path, session_name, f"{session_name}_data.json")
+        with open(final_path, "w") as fp:
             json.dump(video, fp)
-        return json_path
+            self.log.info(f"Data from session {session} saved in path {final_path}")
 
     def read_directories(self):
+        self.log.info(f"Reading video data directories from '{self.data_path}'")
         sessions_paths = []
-        for path in self.metadata_path.iterdir():
+        for path in self.data_path.iterdir():
             if path.is_dir():
                 session_name = str(path).split("/")[-1]
                 data = Path(path, f"session-{session_name}-faces.txt")
@@ -128,7 +132,7 @@ class VideoPreprocessingPipeline(Pipeline):
 
     def run(self) -> None:
         sessions_paths = self.read_directories()
-        self.log.info(f"Found {len(sessions_paths)} parliament videos")
+        self.log.info(f"Found {len(sessions_paths)} parliament videos.")
         with alive_bar(len(sessions_paths)) as bar:
             for session in sessions_paths:
                 self.log.info(f"Preprocessing session '{session['session_name']}'.")
@@ -136,6 +140,5 @@ class VideoPreprocessingPipeline(Pipeline):
                 frames = self.read_video_metadata(session["metadata"], features)
                 first_frame = min(frames.keys())
                 scenes = self.obtain_scene_changes(session["scenes_path"], first_frame)
-                save_path = self.save_to_json(session["session_name"], frames, scenes)
-                self.log.info(f"Saving session data in '{save_path}'")
+                self.save_to_json(session["session_name"], frames, scenes)
             bar()

@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore")
 # ========== ========== ========== ==========
 # # PARSE ARGS
 # ========== ========== ========== ==========
-
+'''
 parser = argparse.ArgumentParser(description = "FaceTracker");
 parser.add_argument('--data_dir',       type=str, default='data/work', help='Output direcotry');
 parser.add_argument('--videofile',      type=str, default='',   help='Input video file');
@@ -33,7 +33,7 @@ parser.add_argument('--frame_rate',     type=int, default=25,   help='Frame rate
 parser.add_argument('--num_failed_det', type=int, default=25,   help='Number of missed detections allowed before tracking is stopped');
 parser.add_argument('--min_face_size',  type=int, default=100,  help='Minimum face size in pixels');
 opt = parser.parse_args();
-
+'''
 # ========== ========== ========== ==========
 # # IOU FUNCTION
 # ========== ========== ========== ==========
@@ -150,7 +150,7 @@ def crop_video(opt,track,cropfile):
   # ========== CROP AUDIO FILE ==========
 
   command = ("ffmpeg -y -i %s -ss %.3f -to %.3f %s" % (os.path.join(opt.avi_dir,opt.reference,'audio.wav'),audiostart,audioend,audiotmp)) 
-  output = subprocess.call(command, shell=True, stdout=None)
+  output = subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
   if output != 0:
     pdb.set_trace()
@@ -160,16 +160,16 @@ def crop_video(opt,track,cropfile):
   # ========== COMBINE AUDIO AND VIDEO FILES ==========
 
   command = ("ffmpeg -y -i %st.avi -i %s -c:v copy -c:a copy %s.avi" % (cropfile,audiotmp,cropfile))
-  output = subprocess.call(command, shell=True, stdout=None)
+  output = subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
   if output != 0:
     pdb.set_trace()
 
-  print('Written %s'%cropfile)
+  #print('Written %s'%cropfile)
 
   os.remove(cropfile+'t.avi')
 
-  print('Mean pos: x %.2f y %.2f s %.2f'%(np.mean(dets['x']),np.mean(dets['y']),np.mean(dets['s'])))
+  #print('Mean pos: x %.2f y %.2f s %.2f'%(np.mean(dets['x']),np.mean(dets['y']),np.mean(dets['s'])))
 
   return {'track':track, 'proc_track':dets}
 
@@ -201,7 +201,7 @@ def inference_video(opt):
 
     elapsed_time = time.time() - start_time
 
-    print('%s-%05d; %d dets; %.2f Hz' % (os.path.join(opt.avi_dir,opt.reference,'video.avi'),fidx,len(dets[-1]),(1/elapsed_time))) 
+    #print('%s-%05d; %d dets; %.2f Hz' % (os.path.join(opt.avi_dir,opt.reference,'video.avi'),fidx,len(dets[-1]),(1/elapsed_time))) 
 
   savepath = os.path.join(opt.work_dir,opt.reference,'faces.pckl')
 
@@ -239,7 +239,7 @@ def scene_detect(opt):
   with open(savepath, 'wb') as fil:
     pickle.dump(scene_list, fil)
 
-  print('%s - scenes detected %d'%(os.path.join(opt.avi_dir,opt.reference,'video.avi'),len(scene_list)))
+  #print('%s - scenes detected %d'%(os.path.join(opt.avi_dir,opt.reference,'video.avi'),len(scene_list)))
 
   return scene_list
     
@@ -253,7 +253,6 @@ def run_pipeline(opt):
   setattr(opt,'work_dir',os.path.join(opt.data_dir,'pywork'))
   setattr(opt,'crop_dir',os.path.join(opt.data_dir,'pycrop'))
   setattr(opt,'frames_dir',os.path.join(opt.data_dir,'pyframes'))
-
   setattr(opt, 'facedet_scale', 0.25)
   setattr(opt, 'crop_scale', 0.40)
   setattr(opt, 'min_track', 100)
@@ -289,13 +288,13 @@ def run_pipeline(opt):
   # ========== CONVERT VIDEO AND EXTRACT FRAMES ==========
 
   command = ("ffmpeg -y -i %s -qscale:v 2 -async 1 -r 25 %s" % (opt.videofile,os.path.join(opt.avi_dir,opt.reference,'video.avi')))
-  output = subprocess.call(command, shell=True, stdout=None)
+  output = subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
   command = ("ffmpeg -y -i %s -qscale:v 2 -threads 1 -f image2 %s" % (os.path.join(opt.avi_dir,opt.reference,'video.avi'),os.path.join(opt.frames_dir,opt.reference,'%06d.jpg'))) 
-  output = subprocess.call(command, shell=True, stdout=None)
+  output = subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
   command = ("ffmpeg -y -i %s -ac 1 -vn -acodec pcm_s16le -ar 16000 %s" % (os.path.join(opt.avi_dir,opt.reference,'video.avi'),os.path.join(opt.avi_dir,opt.reference,'audio.wav'))) 
-  output = subprocess.call(command, shell=True, stdout=None)
+  output = subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
   # ========== FACE DETECTION ==========
 

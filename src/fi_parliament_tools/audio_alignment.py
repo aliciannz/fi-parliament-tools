@@ -8,20 +8,17 @@ import math
 
 class AudioAlignmentPipeline(Pipeline):
     def __init__(
-        self, transcript_path: Path, data_video_path: str, output_path: Path
+        self, data_path, output_path, session_name
     ) -> None:
-        self.transcript_path = transcript_path
-        self.data_video_path = Path("data/processed/", data_video_path)
+        self.data_path = data_path
+        data_path.mkdir(exist_ok=True)
+        self.transcript_path = Path(data_path, "text")
         self.output_path = output_path
         self.output_path.mkdir(exist_ok=True)
-        self.session_name = data_video_path.split(".")[0]
-        self.video_path = Path("data/raw/033-2020/session-033-2020.mp4")
-        
+        self.session_name = session_name
+        self.video_path = Path(data_path, f"{session_name}/session-{session_name}.mp4")
+        self.transcript = self.read_transcript()
 
-    def read_json(self):
-        with open(self.data_video_path, "r") as f:
-            data = json.load(f)
-        return data
 
     def read_transcript(self):
         transcript_data = []
@@ -47,16 +44,17 @@ class AudioAlignmentPipeline(Pipeline):
         n_frame = math.floor(float(seconds) * 25)
         return int(n_frame)
 
-    def align_audio(self, data, transcript):
+    def align_audio(self, data, start_scene, end_scene):
+        creator = VideoCreatorPipeline(self.output_path, self.video_path, self.session_name, start_scene, end_scene)
+        alignments = 0
         for data_row in data:
             scene = data_row["scene"]
             start_scene, end_scene = scene.split('-')
             start_time_d = data_row["start_frame"]
             end_time_d = data_row["end_frame"]
-            creator = VideoCreatorPipeline(self.output_path, self.video_path,  self.session_name, int(start_scene), int(end_scene))
-            creator.obtain_frames(start_time_d, end_time_d)
+            scene_path = Path(self.output_path, self.session_name, scene)
 
-            for trans_row in transcript:
+            for trans_row in self.transcript:
                 start_time_t = self.timestamp_to_frame(trans_row["start_timestamp"])
                 end_time_t = self.timestamp_to_frame(trans_row["end_timestamp"])
                 if start_time_t >= start_time_d and end_time_t <= end_time_d:
@@ -64,21 +62,8 @@ class AudioAlignmentPipeline(Pipeline):
                     start_index = start_time_t - start_time_d
                     end_index = end_time_t - start_time_d
                     coords = data_row["coords"][start_index:end_index]
-                    path_scene = Path(self.output_path, scene)
-                    path_scene.mkdir(exist_ok=True)
-                    print(frames)
                     video = creator.generate_video(data_row["speaker"], frames, coords)
                     with open(video[:-4] + ".txt", "w") as f:
                         f.write(trans_row["transcript"])
-
-    def run(self):
-        data = self.read_json()
-        transcript = self.read_transcript()
-        self.align_audio(data, transcript)
-
-
-transcript_path = Path("data/raw/text")
-output_path = Path("data/aligned/")
-data_video_path = "033-2020.json"
-a = AudioAlignmentPipeline(transcript_path, data_video_path, output_path)
-a.run()
+                    alignments +=1
+        print(f"Made {alignments} alignments in scene {start_scene}-{end_scene}")
