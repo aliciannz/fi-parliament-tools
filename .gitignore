@@ -1,5 +1,8 @@
 .mypy_cache/
 /data/
+!/data/raw
+/data/raw/*
+!/data/raw/initialize.sh
 /models/
 .DS_Store
 README.Aalto
